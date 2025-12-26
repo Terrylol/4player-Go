@@ -23,13 +23,18 @@ def self_play(model, board_size=9, num_games=10):
             
             game_history.append([state, action_probs, 0])
             env.step(action)
+            
+            # Simple progress logging
+            if env.turn_count % 10 == 0:
+                print(f"Game {i+1}/{num_games} Step {env.turn_count}...", end='\r')
         
         # Game Over - Assign rewards
         scores = env.get_scores()
         team0_score = scores[0]
         team1_score = scores[1]
-        
-        print(f"Game {i+1}/{num_games} Over. Scores: Team0(AC)={team0_score}, Team1(BD)={team1_score}")
+
+        print(f"Game {i+1}/{num_games} Over (Turns: {env.turn_count}). Scores: Team0(AC)={team0_score}, Team1(BD)={team1_score}")
+        print(f"Game history length: {len(game_history)}")
         
         if team0_score > team1_score:
             winner_team = 0

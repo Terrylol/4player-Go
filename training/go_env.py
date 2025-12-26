@@ -3,6 +3,7 @@ import numpy as np
 # Constants
 BOARD_SIZE = 9
 NUM_PLAYERS = 4
+MAX_TURNS = 100 # Limit game length to avoid infinite loops and match 9x9 average game length
 TEAMS = {0: 0, 1: 1, 2: 0, 3: 1}  # 0=A(Team0), 1=B(Team1), 2=C(Team0), 3=D(Team1)
 # 0: Empty, 1: P0, 2: P1, 3: P2, 4: P3
 EMPTY = 0
@@ -58,16 +59,90 @@ class GoEnv:
         return state
 
     def get_valid_moves(self):
-        # Simplification: Allow all empty spots not strictly suicide
-        # For full rules, need true suicide check and ko check
+        # Allow all empty spots not strictly suicide and not violating Ko
         moves = []
         for y in range(self.board_size):
             for x in range(self.board_size):
                 if self.board[y, x] == 0:
-                    # TODO: Add suicide and Ko check here for strict compliance
-                    moves.append(y * self.board_size + x)
+                    if self._is_move_valid(x, y):
+                        moves.append(y * self.board_size + x)
         moves.append(self.board_size * self.board_size) # Pass
         return moves
+
+    def _is_move_valid(self, x, y):
+        """
+        Check if a move at (x, y) is valid (Suicide check + Superko check).
+        This does a temporary forward pass on the board.
+        """
+        # 1. Place stone
+        original_stone = self.board[y, x]
+        self.board[y, x] = self.current_player + 1
+        
+        # 2. Check captures (neighbors of enemy/teammate colors)
+        neighbors = self._get_neighbors(x, y)
+        captured_groups = [] # List of (x, y) for each captured stone
+        
+        for nx, ny in neighbors:
+            stone = self.board[ny, nx]
+            if stone != 0 and stone != (self.current_player + 1):
+                # Check if this enemy group has 0 liberties
+                if not self._check_group_liberties(nx, ny):
+                    # This group is captured
+                    group_stones = self._get_group_stones(nx, ny)
+                    captured_groups.extend(group_stones)
+        
+        # 3. Check Suicide
+        # If no captures, check if the placed stone has liberties
+        has_liberties = False
+        if not captured_groups:
+            has_liberties = self._check_group_liberties(x, y)
+        else:
+            # If we captured something, we definitely have liberties (the spots we just cleared)
+            has_liberties = True
+            
+        if not has_liberties:
+            # Revert and return False (Suicide)
+            self.board[y, x] = original_stone
+            return False
+
+        # 4. Check Superko
+        # We need to simulate the board after captures
+        captured_values = {} # (x,y) -> value
+        for cx, cy in captured_groups:
+            captured_values[(cx, cy)] = self.board[cy, cx]
+            self.board[cy, cx] = 0 # Remove stone
+            
+        board_bytes = self.board.tobytes()
+        is_ko = board_bytes in self.history
+        
+        # 5. Revert everything
+        # Restore captured stones
+        for (cx, cy), val in captured_values.items():
+            self.board[cy, cx] = val
+        # Restore placed stone
+        self.board[y, x] = original_stone
+        
+        return not is_ko
+
+    def _get_group_stones(self, x, y):
+        """Return list of (x, y) coordinates for all stones in the group at (x, y)"""
+        group_color = self.board[y, x]
+        if group_color == 0: return []
+        
+        stack = [(x, y)]
+        visited = set()
+        visited.add((x, y))
+        stones = []
+        
+        while stack:
+            cx, cy = stack.pop()
+            stones.append((cx, cy))
+            
+            for nx, ny in self._get_neighbors(cx, cy):
+                if self.board[ny, nx] == group_color and (nx, ny) not in visited:
+                    visited.add((nx, ny))
+                    stack.append((nx, ny))
+        return stones
 
     def step(self, action):
         if self.done:
@@ -116,7 +191,7 @@ class GoEnv:
         self.current_player = (self.current_player + 1) % 4
         self.turn_count += 1
         
-        if self.turn_count > self.board_size * self.board_size * 4: # Max turn limit
+        if self.turn_count > MAX_TURNS: # Max turn limit
             self.done = True
 
         return self.get_state(), 0, self.done, {}

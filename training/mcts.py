@@ -58,11 +58,30 @@ class MCTS:
                 scratch_env.step(action)
             
             # Expand & Evaluate
-            # (In simplified version, we just use the value from network for leaf)
             state_tensor = torch.FloatTensor(scratch_env.get_state()).unsqueeze(0).to(device)
             with torch.no_grad():
-                p, v = self.model(state_tensor)
+                policy_logits, v = self.model(state_tensor)
                 value = v.item()
+                policy_probs = torch.exp(policy_logits).cpu().numpy()[0]
+
+            # Expand the node if game is not done
+            if not scratch_env.done:
+                valid_moves = scratch_env.get_valid_moves()
+                # Mask invalid moves
+                mask = np.zeros_like(policy_probs)
+                for move in valid_moves:
+                    mask[move] = 1
+                policy_probs *= mask
+                
+                sum_probs = np.sum(policy_probs)
+                if sum_probs > 0:
+                    policy_probs /= sum_probs
+                else:
+                    policy_probs[valid_moves] = 1.0 / len(valid_moves)
+
+                for move in valid_moves:
+                    if move not in node.children:
+                        node.children[move] = MCTSNode(node, policy_probs[move])
             
             # Backpropagate
             # Note: Value is for current player. 
@@ -104,5 +123,4 @@ class MCTS:
         return best_action, best_child
 
     def _clone_env(self, env):
-        import copy
-        return copy.deepcopy(env)
+        return env.copy()
