@@ -16,21 +16,43 @@ class MCTSNode:
         return self.value_sum / self.visit_count
 
 class MCTS:
-    def __init__(self, model, num_simulations=50, c_puct=1.0):
-        self.model = model
+    def __init__(self, model_or_func, num_simulations=50, c_puct=1.0, device=None):
+        """
+        model_or_func: Either a torch.nn.Module or a callable function.
+                       If function: expects input (state_numpy) -> returns (policy_probs_numpy, value_float)
+        """
         self.num_simulations = num_simulations
         self.c_puct = c_puct
+        
+        if isinstance(model_or_func, torch.nn.Module):
+            self.model = model_or_func
+            self.mode = 'local'
+            if device:
+                self.device = device
+            else:
+                self.device = next(model_or_func.parameters()).device
+        else:
+            self.predict_func = model_or_func
+            self.mode = 'remote'
+
+    def _predict(self, state):
+        if self.mode == 'local':
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                policy_logits, v = self.model(state_tensor)
+                value = v.item()
+                policy_probs = torch.exp(policy_logits).cpu().numpy()[0]
+            return policy_probs, value
+        else:
+            # Remote/Callback mode: expect numpy arrays back
+            return self.predict_func(state)
 
     def search(self, env):
         root = MCTSNode()
         
         # Expand root
         state = env.get_state()
-        device = next(self.model.parameters()).device
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
-        with torch.no_grad():
-            policy_logits, value = self.model(state_tensor)
-            policy_probs = torch.exp(policy_logits).cpu().numpy()[0]
+        policy_probs, value = self._predict(state)
         
         valid_moves = env.get_valid_moves()
         # Mask invalid moves
@@ -58,11 +80,7 @@ class MCTS:
                 scratch_env.step(action)
             
             # Expand & Evaluate
-            state_tensor = torch.FloatTensor(scratch_env.get_state()).unsqueeze(0).to(device)
-            with torch.no_grad():
-                policy_logits, v = self.model(state_tensor)
-                value = v.item()
-                policy_probs = torch.exp(policy_logits).cpu().numpy()[0]
+            policy_probs, value = self._predict(scratch_env.get_state())
 
             # Expand the node if game is not done
             if not scratch_env.done:

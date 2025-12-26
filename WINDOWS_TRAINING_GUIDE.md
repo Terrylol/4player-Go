@@ -33,16 +33,30 @@ pip install onnx onnxruntime
 
 ## 2. 训练 AI
 
-我们提供了现成的训练脚本 `train.py`。默认配置下，它会训练一个 9x9 的 AI。
+### 2.1 高性能并行训练 (推荐)
+针对您的 RTX 4060 显卡，我们提供了优化过的并行训练脚本 `train_parallel.py`，它利用多进程 CPU 进行模拟，并使用 GPU 进行批量推理，速度比普通训练快 5-10 倍。
 
-### 2.1 开始训练
+在 `training` 目录下运行：
+```powershell
+python train_parallel.py
+```
+
+您可以编辑 `train_parallel.py` 开头的配置：
+```python
+NUM_WORKERS = 4      # 根据您的 CPU 核心数调整 (建议设置为 CPU 核心数 - 2)
+BATCH_SIZE = 128     # 4060 显存充足，可以设为 128 或 256
+GAMES_PER_EPOCH = 20 # 每轮对局数
+```
+
+### 2.2 普通训练 (旧版)
+如果并行训练遇到问题，您可以使用传统的单进程训练脚本 `train.py`。
 在 `training` 目录下运行：
 ```powershell
 python train.py
 ```
 
-### 2.2 自定义参数
-您可以编辑 `train.py` 文件的底部来修改训练参数：
+### 2.3 自定义参数
+您可以编辑脚本文件的底部来修改训练参数：
 ```python
 if __name__ == "__main__":
     # board_size: 棋盘大小 (9, 13, 19)
