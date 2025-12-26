@@ -10,9 +10,9 @@ from mcts import MCTS
 
 # Configuration
 BOARD_SIZE = 9
-NUM_WORKERS = 4 # Adjust based on CPU cores (e.g., 4-8 for M1/M2/M3)
-GAMES_PER_WORKER = 2
-BATCH_SIZE = 64
+NUM_WORKERS = 10 # Optimized for i5-12400 (6P cores + HT = 12 threads), leave 2 for system
+GAMES_PER_WORKER = 2 # Will be dynamically calculated based on total games
+BATCH_SIZE = 256 # Optimized for RTX 4060 (8GB VRAM)
 MCTS_SIMS = 50
 
 def self_play_worker(worker_id, input_queue, output_queue, result_queue, num_games, board_size, mcts_sims):
@@ -171,7 +171,83 @@ def inference_server(model, input_queue, output_queues, device, num_workers):
         for i, w_id in enumerate(batch_worker_ids):
             output_queues[w_id].put((policy_probs[i], value_preds[i].item()))
 
-def train_parallel(board_size=9, epochs=10, games_per_epoch=10):
+def arena_match(old_model, new_model, board_size, games=10, mcts_sims=50):
+    """
+    Compare old_model vs new_model.
+    Returns: new_model_win_rate (0.0 - 1.0)
+    """
+    wins_new = 0
+    draws = 0
+    wins_old = 0
+    
+    # We can run this in serial for simplicity or parallelize if needed.
+    # Given games=10, serial is fast enough.
+    print(f"Arena: Playing {games} games (New vs Old)...")
+    
+    # Helper to get prediction from a model (local)
+    def make_predict_func(model):
+        device = next(model.parameters()).device
+        def predict(state):
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
+            with torch.no_grad():
+                logits, v = model(state_tensor)
+                policy = torch.exp(logits).cpu().numpy()[0]
+                value = v.item()
+            return policy, value
+        return predict
+
+    pred_new = make_predict_func(new_model)
+    pred_old = make_predict_func(old_model)
+
+    for i in range(games):
+        env = GoEnv(board_size=board_size)
+        # Randomize who goes first: 0/2 is Team A, 1/3 is Team B
+        # Let's say New Model plays Team A (P0, P2), Old Model plays Team B (P1, P3)
+        # We should swap roles halfway
+        
+        # Simple setup:
+        # Games 0-4: New=Team0, Old=Team1
+        # Games 5-9: Old=Team0, New=Team1
+        new_is_team0 = (i < games // 2)
+        
+        while not env.done:
+            state = env.get_state()
+            current_team = 0 if env.current_player in [0, 2] else 1
+            
+            # Decide who plays
+            if (current_team == 0 and new_is_team0) or (current_team == 1 and not new_is_team0):
+                # New Model to move
+                mcts = MCTS(pred_new, num_simulations=mcts_sims)
+            else:
+                # Old Model to move
+                mcts = MCTS(pred_old, num_simulations=mcts_sims)
+            
+            # Greedy action for evaluation (no noise)
+            probs = mcts.search(env, add_dirichlet_noise=False)
+            action = np.argmax(probs)
+            env.step(action)
+            
+        scores = env.get_scores()
+        # Team 0 score vs Team 1 score
+        if scores[0] > scores[1]:
+            winner_team = 0
+        elif scores[1] > scores[0]:
+            winner_team = 1
+        else:
+            winner_team = -1
+            
+        if winner_team == -1:
+            draws += 1
+        elif (winner_team == 0 and new_is_team0) or (winner_team == 1 and not new_is_team0):
+            wins_new += 1
+        else:
+            wins_old += 1
+            
+    win_rate = (wins_new + 0.5 * draws) / games
+    print(f"Arena Result: New {wins_new} - {wins_old} Old ({draws} Draws). Win Rate: {win_rate:.2f}")
+    return win_rate
+
+def train_parallel(board_size=9, epochs=300, games_per_epoch=100):
     mp.set_start_method('spawn', force=True)
     
     # Device setup
@@ -186,10 +262,14 @@ def train_parallel(board_size=9, epochs=10, games_per_epoch=10):
         print("Using CPU for training.")
 
     model = AlphaZeroNet(board_size=board_size).to(device)
-    # Optional: Load checkpoint
-    # model.load_state_dict(torch.load("latest_model.pth"))
+    if os.path.exists("latest_model.pth"):
+        model.load_state_dict(torch.load("latest_model.pth", map_location=device))
+        print("Loaded existing model.")
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    # Optimizer & Scheduler
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    # LR Decay: Reduce LR by factor of 0.9 every 10 epochs
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.9)
 
     # Calculate games per worker
     games_per_worker = max(1, games_per_epoch // NUM_WORKERS)
@@ -270,11 +350,46 @@ def train_parallel(board_size=9, epochs=10, games_per_epoch=10):
             total_loss += loss.item()
             steps += 1
             
-        print(f"Epoch {epoch} Loss: {total_loss/steps:.4f}")
+        print(f"Epoch {epoch} Loss: {total_loss/steps:.4f} | LR: {scheduler.get_last_lr()[0]:.6f}")
         
-        # Save Checkpoint
-        torch.save(model.state_dict(), "latest_model.pth")
+        # Step the scheduler
+        scheduler.step()
         
+        # Arena Evaluation: New Model vs Old Model
+        # Save a temp copy of the new model
+        torch.save(model.state_dict(), "temp_new_model.pth")
+        
+        # Load old model for comparison (if it exists, otherwise we just improved from scratch)
+        if os.path.exists("latest_model.pth"):
+            old_model = AlphaZeroNet(board_size=board_size).to(device)
+            old_model.load_state_dict(torch.load("latest_model.pth", map_location=device))
+            old_model.eval()
+            
+            # Run Arena
+            win_rate = arena_match(old_model, model, board_size, games=10, mcts_sims=50)
+            
+            if win_rate >= 0.55:
+                print(f"New model accepted! (Win Rate: {win_rate:.2f})")
+                torch.save(model.state_dict(), "latest_model.pth")
+            else:
+                print(f"New model rejected. (Win Rate: {win_rate:.2f})")
+                # Revert model to old state for next epoch (optional, or just keep training from here?
+                # Usually we revert to keep the 'good' base.)
+                model.load_state_dict(old_model.state_dict())
+        else:
+            print("First model saved.")
+            torch.save(model.state_dict(), "latest_model.pth")
+        
+        # Cleanup temp file
+        if os.path.exists("temp_new_model.pth"):
+            os.remove("temp_new_model.pth")
+            
+    # Cleanup workers
+    for q in input_queues:
+        q.put("DONE")
+    for w in workers:
+        w.join()
+
 if __name__ == "__main__":
     # Ensure multiprocessing works correctly on Windows (and macOS)
     try:
@@ -282,5 +397,5 @@ if __name__ == "__main__":
     except RuntimeError:
         pass # Context might already be set
 
-    # Example: Run 5 epochs, 20 games per epoch
-    train_parallel(epochs=5, games_per_epoch=20)
+    # Example: Run 300 epochs, 100 games per epoch (optimized for 20 hours)
+    train_parallel(epochs=300, games_per_epoch=100)
