@@ -102,8 +102,8 @@ def self_play_worker(worker_id, input_queue, output_queue, result_queue, num_gam
 
         # game_history contains 4 entries per actual turn
         # The turns are sequential: Turn 0 (Aug 0,1,2,3), Turn 1 (Aug 0,1,2,3)...
-        for i, sample in enumerate(game_history):
-            turn_idx = i // 4 # Integer division to get the actual turn number
+        for s_idx, sample in enumerate(game_history):
+            turn_idx = s_idx // 4 # Integer division to get the actual turn number
             player = turn_idx % 4
             
             sample[2] = rewards_by_player[player]
