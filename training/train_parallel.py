@@ -1,6 +1,7 @@
 
 import os
 import time
+import datetime
 import torch
 import torch.multiprocessing as mp
 import numpy as np
@@ -275,6 +276,8 @@ def train_parallel(board_size=9, epochs=300, games_per_epoch=100):
     games_per_worker = max(1, games_per_epoch // NUM_WORKERS)
     print(f"Starting Parallel Training: {NUM_WORKERS} workers, {games_per_worker} games each.")
 
+    train_start_time = time.time()
+
     for epoch in range(1, epochs + 1):
         print(f"\n=== Epoch {epoch}/{epochs} ===")
         start_time = time.time()
@@ -383,6 +386,17 @@ def train_parallel(board_size=9, epochs=300, games_per_epoch=100):
         # Cleanup temp file
         if os.path.exists("temp_new_model.pth"):
             os.remove("temp_new_model.pth")
+        
+        # ETA Calculation
+        elapsed = time.time() - train_start_time
+        avg_time_per_epoch = elapsed / epoch
+        remaining_epochs = epochs - epoch
+        eta_seconds = remaining_epochs * avg_time_per_epoch
+        
+        elapsed_str = str(datetime.timedelta(seconds=int(elapsed)))
+        eta_str = str(datetime.timedelta(seconds=int(eta_seconds)))
+        
+        print(f"Time Elapsed: {elapsed_str} | ETA: {eta_str} | Avg/Epoch: {avg_time_per_epoch:.2f}s")
             
     # Cleanup workers
     for q in input_queues:
