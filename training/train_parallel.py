@@ -269,8 +269,8 @@ def train_parallel(board_size=9, epochs=300, games_per_epoch=100):
     
     # Optimizer & Scheduler
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
-    # LR Decay: Reduce LR by factor of 0.9 every 10 epochs
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.9)
+    # No LR Decay for early stage training
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.9)
 
     # Calculate games per worker
     games_per_worker = max(1, games_per_epoch // NUM_WORKERS)
@@ -353,39 +353,17 @@ def train_parallel(board_size=9, epochs=300, games_per_epoch=100):
             total_loss += loss.item()
             steps += 1
             
-        print(f"Epoch {epoch} Loss: {total_loss/steps:.4f} | LR: {scheduler.get_last_lr()[0]:.6f}")
+        print(f"Epoch {epoch} Loss: {total_loss/steps:.4f}")
         
         # Step the scheduler
-        scheduler.step()
+        # scheduler.step()
         
-        # Arena Evaluation: New Model vs Old Model
-        # Save a temp copy of the new model
-        torch.save(model.state_dict(), "temp_new_model.pth")
+        # Always save the latest model (No Arena for early stage)
+        torch.save(model.state_dict(), "latest_model.pth")
         
-        # Load old model for comparison (if it exists, otherwise we just improved from scratch)
-        if os.path.exists("latest_model.pth"):
-            old_model = AlphaZeroNet(board_size=board_size).to(device)
-            old_model.load_state_dict(torch.load("latest_model.pth", map_location=device))
-            old_model.eval()
-            
-            # Run Arena
-            win_rate = arena_match(old_model, model, board_size, games=10, mcts_sims=50)
-            
-            if win_rate >= 0.55:
-                print(f"New model accepted! (Win Rate: {win_rate:.2f})")
-                torch.save(model.state_dict(), "latest_model.pth")
-            else:
-                print(f"New model rejected. (Win Rate: {win_rate:.2f})")
-                # Revert model to old state for next epoch (optional, or just keep training from here?
-                # Usually we revert to keep the 'good' base.)
-                model.load_state_dict(old_model.state_dict())
-        else:
-            print("First model saved.")
-            torch.save(model.state_dict(), "latest_model.pth")
-        
-        # Cleanup temp file
-        if os.path.exists("temp_new_model.pth"):
-            os.remove("temp_new_model.pth")
+        # Optional: Keep checkpoints every 50 epochs
+        if epoch % 50 == 0:
+             torch.save(model.state_dict(), f"model_epoch_{epoch}.pth")
         
         # ETA Calculation
         elapsed = time.time() - train_start_time
