@@ -34,7 +34,8 @@ class GoEnv:
         new_env.history = self.history.copy()
         new_env.done = self.done
         return new_env
-        # Return state representation for Neural Network
+    def get_state(self):
+        """Return state representation for Neural Network"""
         # Channels: 
         # 0: Current Player stones
         # 1: Teammate stones

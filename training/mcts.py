@@ -104,4 +104,5 @@ class MCTS:
         return best_action, best_child
 
     def _clone_env(self, env):
-        return env.copy()
+        import copy
+        return copy.deepcopy(env)
