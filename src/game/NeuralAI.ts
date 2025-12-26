@@ -26,7 +26,7 @@ export class NeuralAI {
             const modelPath = `/models/model_${size}x${size}.onnx`;
             const session = await ort.InferenceSession.create(modelPath);
             sessionCache[size] = session;
-            console.log(`Neural AI Model ${size}x${size} loaded successfully`);
+            console.log(`%c 🤖 Neural AI Model ${size}x${size} loaded successfully! `, 'background: #222; color: #bada55; font-size: 14px; font-weight: bold;');
             return session;
         } catch (e) {
             console.error(`Failed to load Neural AI model for size ${size}:`, e);

@@ -41,13 +41,32 @@ def self_play_worker(worker_id, input_queue, output_queue, result_queue, num_gam
         
         while not env.done:
             state = env.get_state()
-            probs = mcts.search(env)
+            # Add noise only at root for the first 30 moves to encourage exploration
+            add_noise = (env.turn_count < 30)
+            probs = mcts.search(env, add_dirichlet_noise=add_noise)
             
-            # Add dirichlet noise for exploration (optional but recommended for training)
-            # For simplicity, we stick to basic probabilistic sampling
+            # Select action based on visit counts (probs from search)
+            # In competitive play, we pick argmax. In training, we sample.
+            # Temperature annealing: high temp early, low temp later?
+            # For simplicity, we just sample directly from visit probabilities.
             action = np.random.choice(len(probs), p=probs)
             
-            game_history.append([state, probs, 0])
+            # Data Augmentation: Rotate state and policy 4 times
+            # 9x9 board flattened policy: 0..80 are board positions, 81 is pass
+            for k in range(4):
+                # 1. Rotate State (5, 9, 9)
+                # k=0: 0 deg, k=1: 90 deg, etc.
+                rot_state = np.rot90(state, k=k, axes=(1, 2)).copy()
+                
+                # 2. Rotate Policy (82,)
+                # Separate board moves and pass move
+                board_probs = probs[:-1].reshape(board_size, board_size)
+                rot_board_probs = np.rot90(board_probs, k=k).copy()
+                rot_probs = np.append(rot_board_probs.flatten(), probs[-1])
+                
+                # Store
+                game_history.append([rot_state, rot_probs, 0])
+
             env.step(action)
             
             # if worker_id == 0 and env.turn_count % 10 == 0:
@@ -66,17 +85,28 @@ def self_play_worker(worker_id, input_queue, output_queue, result_queue, num_gam
             winner_team = -1
             
         # Backfill rewards
-        for idx, turn in enumerate(game_history):
-            player = idx % 4
-            team = 0 if player in [0, 2] else 1
+        # game_history structure: [state, policy, value]
+        # We collected 4 augmented samples per turn.
+        # So we need to process them in chunks of 4.
+        
+        # Calculate rewards for the whole game first
+        # Players: 0,1,2,3. Teams: 0(AC), 1(BD)
+        rewards_by_player = {}
+        if winner_team == -1:
+            for p in range(4): rewards_by_player[p] = 0.0
+        else:
+            for p in range(4):
+                p_team = 0 if p in [0, 2] else 1
+                rewards_by_player[p] = 1.0 if p_team == winner_team else -1.0
+
+        # game_history contains 4 entries per actual turn
+        # The turns are sequential: Turn 0 (Aug 0,1,2,3), Turn 1 (Aug 0,1,2,3)...
+        for i, sample in enumerate(game_history):
+            turn_idx = i // 4 # Integer division to get the actual turn number
+            player = turn_idx % 4
             
-            if winner_team == -1:
-                reward = 0.0
-            else:
-                reward = 1.0 if team == winner_team else -1.0
-            
-            turn[2] = reward
-            all_training_data.append(turn)
+            sample[2] = rewards_by_player[player]
+            all_training_data.append(sample)
             
         print(f"[Worker {worker_id}] Game {i+1}/{num_games} Finished. Turns: {env.turn_count}")
 

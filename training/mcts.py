@@ -47,7 +47,7 @@ class MCTS:
             # Remote/Callback mode: expect numpy arrays back
             return self.predict_func(state)
 
-    def search(self, env):
+    def search(self, env, add_dirichlet_noise=False):
         root = MCTSNode()
         
         # Expand root
@@ -65,6 +65,22 @@ class MCTS:
         else:
             # If all valid moves have 0 prob (unlikely with softmax), uniform
             policy_probs[valid_moves] = 1.0 / len(valid_moves)
+
+        # Add Dirichlet noise to the root node for exploration
+        if add_dirichlet_noise:
+            # Alpha=0.3 is standard for Go (usually 0.03 for 19x19, 0.3 for 9x9 is okay-ish, maybe 0.15)
+            # We only add noise to valid moves
+            valid_indices = np.array(valid_moves)
+            noise = np.random.dirichlet([0.3] * len(valid_indices))
+            
+            # Mix noise: 75% policy + 25% noise
+            # We need to map noise back to full policy array
+            noise_full = np.zeros_like(policy_probs)
+            noise_full[valid_indices] = noise
+            
+            policy_probs = 0.75 * policy_probs + 0.25 * noise_full
+            # Renormalize just in case
+            policy_probs /= np.sum(policy_probs)
 
         for move in valid_moves:
             root.children[move] = MCTSNode(root, policy_probs[move])
