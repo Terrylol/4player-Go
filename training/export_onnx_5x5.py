@@ -13,8 +13,8 @@ def export_5x5():
     # Ensure output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    # Load model
-    model = AlphaZeroNet(board_size=board_size)
+    # Load model with same architecture as training (Small Net for 5x5)
+    model = AlphaZeroNet(board_size=board_size, num_res_blocks=2, num_filters=32)
     
     try:
         model.load_state_dict(torch.load(model_path, map_location='cpu'))

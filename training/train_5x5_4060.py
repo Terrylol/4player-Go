@@ -13,7 +13,7 @@ from mcts import MCTS
 BOARD_SIZE = 5
 NUM_WORKERS = 10      # Optimized for RTX 4060 + i5/i7 (8-12 threads)
 BATCH_SIZE = 256      # Small board allows larger batch size on 8GB VRAM
-MCTS_SIMS = 50        # Increased to ensure coverage of branching factor (25 moves)
+MCTS_SIMS = 30        # 5x5 needs less search depth
 MAX_TURNS = 30        # 5x5 board max moves around 25-30
 SAVE_DIR = "models_5x5"
 
@@ -156,7 +156,8 @@ def train_parallel(board_size=5, epochs=1000, games_per_epoch=500):
         device = torch.device("cpu")
         print("Using CPU for training.")
 
-    model = AlphaZeroNet(board_size=board_size).to(device)
+    # Use a smaller network for 5x5 board to prevent overfitting and speed up inference
+    model = AlphaZeroNet(board_size=board_size, num_res_blocks=2, num_filters=32).to(device)
     if os.path.exists(model_path):
         model.load_state_dict(torch.load(model_path, map_location=device))
         print(f"Loaded existing model from {model_path}")
