@@ -36,7 +36,7 @@ def self_play_worker(worker_id, input_queue, output_queue, result_queue, num_gam
     all_training_data = []
     
     for i in range(num_games):
-        env = GoEnv(board_size=board_size)
+        env = GoEnv(board_size=board_size, max_turns=100) # Keep 100 for 9x9
         mcts = MCTS(predict_callback, num_simulations=mcts_sims)
         game_history = []
         
@@ -201,7 +201,7 @@ def arena_match(old_model, new_model, board_size, games=10, mcts_sims=50):
     pred_old = make_predict_func(old_model)
 
     for i in range(games):
-        env = GoEnv(board_size=board_size)
+        env = GoEnv(board_size=board_size, max_turns=100)
         # Randomize who goes first: 0/2 is Team A, 1/3 is Team B
         # Let's say New Model plays Team A (P0, P2), Old Model plays Team B (P1, P3)
         # We should swap roles halfway

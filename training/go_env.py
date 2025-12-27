@@ -9,8 +9,9 @@ TEAMS = {0: 0, 1: 1, 2: 0, 3: 1}  # 0=A(Team0), 1=B(Team1), 2=C(Team0), 3=D(Team
 EMPTY = 0
 
 class GoEnv:
-    def __init__(self, board_size=9):
+    def __init__(self, board_size=9, max_turns=None):
         self.board_size = board_size
+        self.max_turns = max_turns if max_turns is not None else (board_size * board_size * 2)
         self.reset()
 
     def reset(self):
@@ -26,7 +27,7 @@ class GoEnv:
 
     def copy(self):
         """Fast copy of the environment"""
-        new_env = GoEnv(self.board_size)
+        new_env = GoEnv(self.board_size, self.max_turns)
         new_env.board = np.copy(self.board)
         new_env.current_player = self.current_player
         new_env.turn_count = self.turn_count
@@ -191,7 +192,7 @@ class GoEnv:
         self.current_player = (self.current_player + 1) % 4
         self.turn_count += 1
         
-        if self.turn_count > MAX_TURNS: # Max turn limit
+        if self.turn_count >= self.max_turns: # Max turn limit
             self.done = True
 
         return self.get_state(), 0, self.done, {}

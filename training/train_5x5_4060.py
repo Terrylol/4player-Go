@@ -14,6 +14,7 @@ BOARD_SIZE = 5
 NUM_WORKERS = 10      # Optimized for RTX 4060 + i5/i7 (8-12 threads)
 BATCH_SIZE = 256      # Small board allows larger batch size on 8GB VRAM
 MCTS_SIMS = 30        # 5x5 needs less search depth
+MAX_TURNS = 30        # 5x5 board max moves around 25-30
 SAVE_DIR = "models_5x5"
 
 def self_play_worker(worker_id, input_queue, output_queue, result_queue, num_games, board_size, mcts_sims):
@@ -34,14 +35,14 @@ def self_play_worker(worker_id, input_queue, output_queue, result_queue, num_gam
     all_training_data = []
     
     for i in range(num_games):
-        env = GoEnv(board_size=board_size)
+        env = GoEnv(board_size=board_size, max_turns=MAX_TURNS)
         mcts = MCTS(predict_callback, num_simulations=mcts_sims)
         game_history = []
         
         while not env.done:
             state = env.get_state()
-            # Add noise only at root for the first 15 moves (shorter for 5x5)
-            add_noise = (env.turn_count < 15)
+            # Add noise only at root for the first 10 moves (shorter for 5x5)
+            add_noise = (env.turn_count < 10)
             probs = mcts.search(env, add_dirichlet_noise=add_noise)
             
             action = np.random.choice(len(probs), p=probs)
@@ -85,7 +86,8 @@ def self_play_worker(worker_id, input_queue, output_queue, result_queue, num_gam
             sample[2] = rewards_by_player[player]
             all_training_data.append(sample)
             
-        # print(f"[Worker {worker_id}] Game {i+1}/{num_games} Finished. Turns: {env.turn_count}")
+        if worker_id == 0:
+            print(f"[Worker {worker_id}] Game {i+1}/{num_games} Finished. Turns: {env.turn_count}")
 
     result_queue.put(all_training_data)
     input_queue.put((worker_id, None)) 
@@ -253,4 +255,4 @@ if __name__ == "__main__":
         pass
 
     # 5x5 Extreme Speed Training
-    train_parallel(board_size=5, epochs=1000, games_per_epoch=500)
+    train_parallel(board_size=5, epochs=1000, games_per_epoch=100)
