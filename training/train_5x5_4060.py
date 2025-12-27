@@ -159,8 +159,14 @@ def train_parallel(board_size=5, epochs=1000, games_per_epoch=500):
     # Use a smaller network for 5x5 board to prevent overfitting and speed up inference
     model = AlphaZeroNet(board_size=board_size, num_res_blocks=2, num_filters=32).to(device)
     if os.path.exists(model_path):
-        model.load_state_dict(torch.load(model_path, map_location=device))
-        print(f"Loaded existing model from {model_path}")
+        try:
+            model.load_state_dict(torch.load(model_path, map_location=device))
+            print("Loaded existing model.")
+        except RuntimeError as e:
+            print(f"Warning: Could not load existing model due to architecture mismatch: {e}")
+            print("Starting training from scratch with new architecture.")
+    else:
+        print("No existing model found. Starting from scratch.")
     
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
     
