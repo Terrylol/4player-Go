@@ -150,7 +150,7 @@ const Game = () => {
           {/* Board Size Selection */}
           <div className="flex gap-2 p-2 bg-white/50 rounded-lg shadow-sm items-center">
               <span className="font-bold text-gray-700 mr-2">Board Size:</span>
-              {[9, 13, 19].map(size => (
+              {[5, 9, 13, 19].map(size => (
                   <button
                     key={size}
                     onClick={() => {
