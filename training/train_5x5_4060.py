@@ -156,9 +156,10 @@ def train_parallel(board_size=5, epochs=1000, games_per_epoch=500):
         device = torch.device("cpu")
         print("Using CPU for training.")
 
-    # Use a smaller network for 5x5 board to prevent overfitting and speed up inference
-    model = AlphaZeroNet(board_size=board_size, num_res_blocks=2, num_filters=32).to(device)
-    if os.path.exists(model_path):
+    # Use a balanced network for 5x5 board: 64 filters for capacity, 3 blocks for speed/depth balance
+    # RTX 4060 is powerful enough that 64 filters won't be a bottleneck, but 32 might be too stupid.
+    model = AlphaZeroNet(board_size=board_size, num_res_blocks=3, num_filters=64).to(device)
+    if os.path.exists(os.path.join(SAVE_DIR, "latest_model.pth")):
         try:
             model.load_state_dict(torch.load(model_path, map_location=device))
             print("Loaded existing model.")
@@ -212,6 +213,8 @@ def train_parallel(board_size=5, epochs=1000, games_per_epoch=500):
         
         batch_idx = 0
         total_loss = 0
+        total_policy_loss = 0
+        total_value_loss = 0
         steps = 0
         train_batch_size = 128 # Smaller training batch for faster updates
         
@@ -227,8 +230,10 @@ def train_parallel(board_size=5, epochs=1000, games_per_epoch=500):
             
             optimizer.zero_grad()
             pred_logits, pred_values = model(states)
+            pred_probs = torch.exp(pred_logits)
             
-            loss_policy = -torch.sum(policies * pred_logits) / len(batch)
+            # Loss: Policy (Cross Entropy) + Value (MSE)
+            loss_policy = -torch.sum(policies * pred_logits) / len(batch) # Average over batch
             loss_value = torch.nn.functional.mse_loss(pred_values, values)
             
             loss = loss_policy + loss_value
@@ -236,9 +241,11 @@ def train_parallel(board_size=5, epochs=1000, games_per_epoch=500):
             optimizer.step()
             
             total_loss += loss.item()
+            total_policy_loss += loss_policy.item()
+            total_value_loss += loss_value.item()
             steps += 1
             
-        print(f"Epoch {epoch} Loss: {total_loss/steps:.4f}")
+        print(f"Epoch {epoch} Loss: {total_loss/steps:.4f} (Policy: {total_policy_loss/steps:.4f}, Value: {total_value_loss/steps:.4f})")
         
         torch.save(model.state_dict(), model_path)
         
