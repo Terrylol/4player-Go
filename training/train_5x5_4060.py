@@ -13,7 +13,7 @@ from mcts import MCTS
 BOARD_SIZE = 5
 NUM_WORKERS = 10      # Optimized for RTX 4060 + i5/i7 (8-12 threads)
 BATCH_SIZE = 256      # Small board allows larger batch size on 8GB VRAM
-MCTS_SIMS = 20        # Reduced from 30 to 20 for even faster 5x5 training
+MCTS_SIMS = 50        # Increased to ensure coverage of branching factor (25 moves)
 MAX_TURNS = 30        # 5x5 board max moves around 25-30
 SAVE_DIR = "models_5x5"
 
